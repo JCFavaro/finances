@@ -4,11 +4,14 @@ import { Card } from '../components/ui/Card';
 import { CategoryPieChart } from '../components/charts/CategoryPieChart';
 import { IncomeExpenseBarChart } from '../components/charts/IncomeExpenseBarChart';
 import { TransactionList } from '../components/transactions/TransactionList';
-import { useMonthSummary, useCategoryStats, useTransactions, useMonthlyStats } from '../db/hooks/useTransactions';
+import { useMonthSummary, useCategoryStats, useTransactions, useMonthlyStats, addTransaction } from '../db/hooks/useTransactions';
 import { useAssetsSummary } from '../db/hooks/useAssets';
+import { useShortcuts } from '../db/hooks/useShortcuts';
+import { useBudgetProgress } from '../db/hooks/useBudgets';
 import { useApp } from '../context/AppContext';
 import { formatCurrency } from '../utils/currency';
-import { CATEGORY_COLORS } from '../utils/constants';
+import { convertToARS } from '../services/exchangeRate';
+import { CATEGORY_COLORS, EXPENSE_CATEGORIES } from '../utils/constants';
 import type { MonthYearFilter } from '../types';
 
 const MONTHS = [
@@ -30,6 +33,39 @@ export function Dashboard() {
   const transactions = useTransactions(filter);
   const monthlyStats = useMonthlyStats(6);
   const assetsSummary = useAssetsSummary(exchangeRate ?? undefined);
+  const shortcuts = useShortcuts();
+  const budgetProgress = useBudgetProgress(filter.month, filter.year);
+  const [shortcutFeedback, setShortcutFeedback] = useState<number | null>(null);
+
+  const handleShortcutClick = async (shortcut: NonNullable<typeof shortcuts>[0]) => {
+    if (!exchangeRate) return;
+
+    try {
+      const amountARS = convertToARS(shortcut.amount, shortcut.currency, exchangeRate);
+
+      await addTransaction({
+        type: 'expense',
+        amount: shortcut.amount,
+        currency: shortcut.currency,
+        amountARS,
+        category: shortcut.category,
+        description: `${shortcut.icon} ${shortcut.name}`,
+        date: new Date(),
+        exchangeRateUsed: shortcut.currency === 'USD' ? exchangeRate.venta : undefined,
+      });
+
+      // Visual feedback
+      setShortcutFeedback(shortcut.id!);
+      setTimeout(() => setShortcutFeedback(null), 500);
+
+      // Haptic feedback if available
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+    } catch (error) {
+      console.error('Error adding shortcut transaction:', error);
+    }
+  };
 
   const handlePrevMonth = () => {
     setFilter(prev => {
@@ -127,6 +163,42 @@ export function Dashboard() {
         </div>
       </Card>
 
+      {/* Quick Shortcuts */}
+      {shortcuts && shortcuts.length > 0 && (
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-900">Accesos Rápidos</h3>
+            <button
+              onClick={() => navigate('/config')}
+              className="text-xs font-medium text-blue-600 hover:text-blue-700"
+            >
+              Editar
+            </button>
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {shortcuts.map((shortcut) => (
+              <button
+                key={shortcut.id}
+                onClick={() => handleShortcutClick(shortcut)}
+                className={`flex flex-col items-center p-3 rounded-xl transition-all ${
+                  shortcutFeedback === shortcut.id
+                    ? 'bg-emerald-100 scale-95'
+                    : 'bg-slate-50 hover:bg-slate-100 active:scale-95'
+                }`}
+              >
+                <span className="text-2xl mb-1">{shortcut.icon}</span>
+                <span className="text-xs font-medium text-slate-700 truncate w-full text-center">
+                  {shortcut.name}
+                </span>
+                <span className="text-xs text-slate-500">
+                  {formatCurrency(shortcut.amount, shortcut.currency)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Quick Stats */}
       <div className="grid grid-cols-2 gap-3">
         <Card padding="sm">
@@ -193,6 +265,58 @@ export function Dashboard() {
         </h3>
         <CategoryPieChart data={categoryChartData} />
       </Card>
+
+      {/* Budget Progress */}
+      {budgetProgress && budgetProgress.length > 0 && (
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-slate-900">Presupuestos del Mes</h3>
+            <button
+              onClick={() => navigate('/config')}
+              className="text-xs font-medium text-blue-600 hover:text-blue-700"
+            >
+              Editar
+            </button>
+          </div>
+          <div className="space-y-4">
+            {budgetProgress.map((budget) => {
+              const catInfo = EXPENSE_CATEGORIES.find(c => c.value === budget.category);
+              const progressColor = budget.percentage < 50
+                ? 'bg-emerald-500'
+                : budget.percentage < 80
+                  ? 'bg-amber-500'
+                  : 'bg-red-500';
+
+              return (
+                <div key={budget.category}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{catInfo?.icon || '📦'}</span>
+                      <span className="text-sm font-medium text-slate-700">
+                        {catInfo?.label || budget.category}
+                      </span>
+                    </div>
+                    <span className="text-sm text-slate-500">
+                      {formatCurrency(budget.spent)} / {formatCurrency(budget.limit)}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${progressColor} transition-all duration-300`}
+                      style={{ width: `${Math.min(budget.percentage, 100)}%` }}
+                    />
+                  </div>
+                  {budget.isOver && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Excedido por {formatCurrency(budget.spent - budget.limit)}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* Monthly Bar Chart */}
       <Card>

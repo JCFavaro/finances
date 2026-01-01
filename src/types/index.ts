@@ -49,6 +49,39 @@ export interface RecurringIncome {
   createdAt: Date;
 }
 
+export interface RecurringExpense {
+  id?: number;
+  name: string;
+  icon: string;
+  amount: number;
+  currency: Currency;
+  category: ExpenseCategory;
+  dayOfMonth: number;
+  isActive: boolean;
+  lastProcessedDate?: Date;
+  createdAt: Date;
+}
+
+export interface QuickShortcut {
+  id?: number;
+  name: string;
+  icon: string;
+  category: ExpenseCategory;
+  amount: number;
+  currency: Currency;
+  order: number;
+  createdAt: Date;
+}
+
+export interface Budget {
+  id?: number;
+  category: ExpenseCategory;
+  amount: number;
+  currency: Currency;
+  isActive: boolean;
+  createdAt: Date;
+}
+
 export interface ExchangeRateCache {
   id: 'dolar-blue';
   compra: number;

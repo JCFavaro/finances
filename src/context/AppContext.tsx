@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { getDolarBlue, type ExchangeRate } from '../services/exchangeRate';
-import { processRecurringIncomes } from '../services/recurringProcessor';
+import { processRecurringIncomes, processRecurringExpenses } from '../services/recurringProcessor';
 import { initializeSettings } from '../db/database';
 import { useOfflineStatus } from '../hooks/useOfflineStatus';
 
@@ -34,6 +34,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await initializeSettings();
         await refreshExchangeRate();
         await processRecurringIncomes();
+        await processRecurringExpenses();
       } catch (error) {
         console.error('Initialization error:', error);
       } finally {

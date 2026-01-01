@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import type { Transaction, RecurringIncome, AppSettings, Asset } from '../types';
+import type { Transaction, RecurringIncome, RecurringExpense, QuickShortcut, Budget, AppSettings, Asset } from '../types';
 
 interface ExportData {
   version: number;
@@ -7,6 +7,9 @@ interface ExportData {
   data: {
     transactions: Transaction[];
     recurringIncomes: RecurringIncome[];
+    recurringExpenses?: RecurringExpense[];
+    shortcuts?: QuickShortcut[];
+    budgets?: Budget[];
     settings: AppSettings | undefined;
     assets?: Asset[];
   };
@@ -15,15 +18,21 @@ interface ExportData {
 export async function exportData(): Promise<string> {
   const transactions = await db.transactions.toArray();
   const recurringIncomes = await db.recurringIncomes.toArray();
+  const recurringExpenses = await db.recurringExpenses.toArray();
+  const shortcuts = await db.shortcuts.toArray();
+  const budgets = await db.budgets.toArray();
   const settings = await db.settings.get('settings');
   const assets = await db.assets.toArray();
 
   const exportData: ExportData = {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     data: {
       transactions,
       recurringIncomes,
+      recurringExpenses,
+      shortcuts,
+      budgets,
       settings,
       assets
     }
@@ -35,7 +44,7 @@ export async function exportData(): Promise<string> {
 export async function importData(jsonString: string): Promise<void> {
   const parsed: ExportData = JSON.parse(jsonString);
 
-  if (parsed.version !== 1) {
+  if (parsed.version !== 1 && parsed.version !== 2) {
     throw new Error('Versión de backup no soportada');
   }
 
@@ -43,9 +52,12 @@ export async function importData(jsonString: string): Promise<void> {
     throw new Error('Formato de backup inválido');
   }
 
-  await db.transaction('rw', [db.transactions, db.recurringIncomes, db.settings, db.assets], async () => {
+  await db.transaction('rw', [db.transactions, db.recurringIncomes, db.recurringExpenses, db.shortcuts, db.budgets, db.settings, db.assets], async () => {
     await db.transactions.clear();
     await db.recurringIncomes.clear();
+    await db.recurringExpenses.clear();
+    await db.shortcuts.clear();
+    await db.budgets.clear();
     await db.assets.clear();
 
     // Convert date strings back to Date objects
@@ -63,6 +75,34 @@ export async function importData(jsonString: string): Promise<void> {
 
     await db.transactions.bulkAdd(transactions);
     await db.recurringIncomes.bulkAdd(recurringIncomes);
+
+    // Import recurring expenses if they exist in the backup
+    if (parsed.data.recurringExpenses && Array.isArray(parsed.data.recurringExpenses)) {
+      const recurringExpenses = parsed.data.recurringExpenses.map(r => ({
+        ...r,
+        createdAt: new Date(r.createdAt),
+        lastProcessedDate: r.lastProcessedDate ? new Date(r.lastProcessedDate) : undefined
+      }));
+      await db.recurringExpenses.bulkAdd(recurringExpenses);
+    }
+
+    // Import shortcuts if they exist in the backup
+    if (parsed.data.shortcuts && Array.isArray(parsed.data.shortcuts)) {
+      const shortcuts = parsed.data.shortcuts.map(s => ({
+        ...s,
+        createdAt: new Date(s.createdAt)
+      }));
+      await db.shortcuts.bulkAdd(shortcuts);
+    }
+
+    // Import budgets if they exist in the backup
+    if (parsed.data.budgets && Array.isArray(parsed.data.budgets)) {
+      const budgets = parsed.data.budgets.map(b => ({
+        ...b,
+        createdAt: new Date(b.createdAt)
+      }));
+      await db.budgets.bulkAdd(budgets);
+    }
 
     // Import assets if they exist in the backup
     if (parsed.data.assets && Array.isArray(parsed.data.assets)) {

@@ -31,3 +31,10 @@ export const CATEGORY_COLORS: Record<string, string> = {
 export const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 
 export const DOLAR_API_URL = 'https://dolarapi.com/v1/dolares/blue';
+
+// Common icons for user selection
+export const COMMON_ICONS = [
+  '📺', '🏠', '💪', '🎵', '📱', '🚗', '💡', '🌐',
+  '🎮', '☁️', '📦', '🏥', '🎓', '💳', '🔒', '⭐',
+  '☕', '🍔', '🚌', '🛒', '💊', '🐕', '✂️', '🎬',
+];
