@@ -1,5 +1,5 @@
 import { db } from '../db/database';
-import type { Transaction, RecurringIncome, AppSettings } from '../types';
+import type { Transaction, RecurringIncome, AppSettings, Asset } from '../types';
 
 interface ExportData {
   version: number;
@@ -8,6 +8,7 @@ interface ExportData {
     transactions: Transaction[];
     recurringIncomes: RecurringIncome[];
     settings: AppSettings | undefined;
+    assets?: Asset[];
   };
 }
 
@@ -15,6 +16,7 @@ export async function exportData(): Promise<string> {
   const transactions = await db.transactions.toArray();
   const recurringIncomes = await db.recurringIncomes.toArray();
   const settings = await db.settings.get('settings');
+  const assets = await db.assets.toArray();
 
   const exportData: ExportData = {
     version: 1,
@@ -22,7 +24,8 @@ export async function exportData(): Promise<string> {
     data: {
       transactions,
       recurringIncomes,
-      settings
+      settings,
+      assets
     }
   };
 
@@ -40,9 +43,10 @@ export async function importData(jsonString: string): Promise<void> {
     throw new Error('Formato de backup inválido');
   }
 
-  await db.transaction('rw', [db.transactions, db.recurringIncomes, db.settings], async () => {
+  await db.transaction('rw', [db.transactions, db.recurringIncomes, db.settings, db.assets], async () => {
     await db.transactions.clear();
     await db.recurringIncomes.clear();
+    await db.assets.clear();
 
     // Convert date strings back to Date objects
     const transactions = parsed.data.transactions.map(t => ({
@@ -59,6 +63,16 @@ export async function importData(jsonString: string): Promise<void> {
 
     await db.transactions.bulkAdd(transactions);
     await db.recurringIncomes.bulkAdd(recurringIncomes);
+
+    // Import assets if they exist in the backup
+    if (parsed.data.assets && Array.isArray(parsed.data.assets)) {
+      const assets = parsed.data.assets.map(a => ({
+        ...a,
+        createdAt: new Date(a.createdAt),
+        updatedAt: new Date(a.updatedAt)
+      }));
+      await db.assets.bulkAdd(assets);
+    }
 
     if (parsed.data.settings) {
       await db.settings.put(parsed.data.settings);

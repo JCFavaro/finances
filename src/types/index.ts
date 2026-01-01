@@ -62,6 +62,19 @@ export interface AppSettings {
   lastBackupDate?: Date;
 }
 
+// Assets / Patrimony
+export type AssetType = 'efectivo' | 'banco' | 'inversiones' | 'crypto' | 'otros';
+
+export interface Asset {
+  id?: number;
+  name: string;
+  type: AssetType;
+  amount: number;
+  currency: Currency;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // API response
 export interface DolarApiResponse {
   moneda: string;

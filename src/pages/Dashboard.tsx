@@ -5,6 +5,8 @@ import { CategoryPieChart } from '../components/charts/CategoryPieChart';
 import { IncomeExpenseBarChart } from '../components/charts/IncomeExpenseBarChart';
 import { TransactionList } from '../components/transactions/TransactionList';
 import { useMonthSummary, useCategoryStats, useTransactions, useMonthlyStats } from '../db/hooks/useTransactions';
+import { useAssetsSummary } from '../db/hooks/useAssets';
+import { useApp } from '../context/AppContext';
 import { formatCurrency } from '../utils/currency';
 import { CATEGORY_COLORS } from '../utils/constants';
 import type { MonthYearFilter } from '../types';
@@ -16,6 +18,7 @@ const MONTHS = [
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { exchangeRate } = useApp();
   const now = new Date();
   const [filter, setFilter] = useState<MonthYearFilter>({
     month: now.getMonth(),
@@ -26,6 +29,7 @@ export function Dashboard() {
   const categoryStats = useCategoryStats(filter);
   const transactions = useTransactions(filter);
   const monthlyStats = useMonthlyStats(6);
+  const assetsSummary = useAssetsSummary(exchangeRate ?? undefined);
 
   const handlePrevMonth = () => {
     setFilter(prev => {
@@ -136,6 +140,51 @@ export function Dashboard() {
           </p>
         </Card>
       </div>
+
+      {/* Patrimony Card */}
+      {assetsSummary && assetsSummary.count > 0 && (
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-900">Patrimonio</h3>
+            <button
+              onClick={() => navigate('/config')}
+              className="text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+              Editar
+            </button>
+          </div>
+          <div className="space-y-2">
+            {assetsSummary.totalARS > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500">Pesos</span>
+                <span className="font-semibold text-slate-900">
+                  {formatCurrency(assetsSummary.totalARS, 'ARS')}
+                </span>
+              </div>
+            )}
+            {assetsSummary.totalUSD > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500">Dólares</span>
+                <span className="font-semibold text-blue-600">
+                  {formatCurrency(assetsSummary.totalUSD, 'USD')}
+                </span>
+              </div>
+            )}
+            {assetsSummary.totalARS > 0 && assetsSummary.totalUSD > 0 && (
+              <>
+                <div className="border-t border-slate-100 pt-2 mt-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-slate-600">Total (en ARS)</span>
+                    <span className="font-bold text-slate-900">
+                      {formatCurrency(assetsSummary.totalUnifiedARS, 'ARS')}
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* Category Pie Chart */}
       <Card>
