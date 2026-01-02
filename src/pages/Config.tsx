@@ -10,10 +10,10 @@ import { useRecurringIncomes, addRecurringIncome, deleteRecurringIncome, toggleR
 import { useRecurringExpenses, addRecurringExpense, deleteRecurringExpense, toggleRecurringExpenseActive } from '../db/supabase/useRecurringExpenses';
 import { useShortcuts, addShortcut, updateShortcut, deleteShortcut } from '../db/supabase/useShortcuts';
 import { useBudgets, addBudget, updateBudget, deleteBudget, toggleBudgetActive } from '../db/supabase/useBudgets';
-import { useAssets, addAsset, updateAsset, deleteAsset, ASSET_TYPES } from '../db/supabase/useAssets';
+import { useAssets, addAsset, updateAsset, deleteAsset, ASSET_TYPES, CRYPTO_TICKERS, useCryptoPrices } from '../db/supabase/useAssets';
 import { formatNumber, formatCurrency } from '../utils/currency';
 import { INCOME_CATEGORIES, EXPENSE_CATEGORIES, COMMON_ICONS } from '../utils/constants';
-import type { Currency, IncomeCategory, ExpenseCategory, AssetType } from '../types';
+import type { Currency, IncomeCategory, ExpenseCategory, AssetType, CryptoTicker } from '../types';
 
 export function Config() {
   const { exchangeRate, refreshExchangeRate } = useApp();
@@ -66,6 +66,10 @@ export function Config() {
   const [assetAmount, setAssetAmount] = useState('');
   const [assetCurrency, setAssetCurrency] = useState<Currency>('ARS');
   const [assetType, setAssetType] = useState<AssetType>('banco');
+  const [assetTicker, setAssetTicker] = useState<CryptoTicker>('BTC');
+  const [assetQuantity, setAssetQuantity] = useState('');
+
+  const cryptoPrices = useCryptoPrices();
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -253,26 +257,42 @@ export function Config() {
     setAssetAmount('');
     setAssetCurrency('ARS');
     setAssetType('banco');
+    setAssetTicker('BTC');
+    setAssetQuantity('');
     setEditingAsset(null);
   };
 
   const handleAddAsset = async () => {
-    if (!assetName || !assetAmount || parseFloat(assetAmount) < 0 || !user) return;
+    if (!user) return;
+
+    // Validate based on type
+    if (assetType === 'crypto') {
+      if (!assetQuantity || parseFloat(assetQuantity) <= 0) return;
+    } else {
+      if (!assetName || !assetAmount || parseFloat(assetAmount) < 0) return;
+    }
 
     try {
+      const isCrypto = assetType === 'crypto';
+      const tickerInfo = CRYPTO_TICKERS.find(t => t.value === assetTicker);
+
       if (editingAsset) {
         await updateAsset(editingAsset, {
-          name: assetName,
-          amount: parseFloat(assetAmount),
-          currency: assetCurrency,
+          name: isCrypto ? tickerInfo?.label || assetTicker : assetName,
+          amount: isCrypto ? 0 : parseFloat(assetAmount),
+          currency: isCrypto ? 'USD' : assetCurrency,
           type: assetType,
+          ticker: isCrypto ? assetTicker : undefined,
+          quantity: isCrypto ? parseFloat(assetQuantity) : undefined,
         });
       } else {
         await addAsset(user.id, {
-          name: assetName,
-          amount: parseFloat(assetAmount),
-          currency: assetCurrency,
+          name: isCrypto ? tickerInfo?.label || assetTicker : assetName,
+          amount: isCrypto ? 0 : parseFloat(assetAmount),
+          currency: isCrypto ? 'USD' : assetCurrency,
           type: assetType,
+          ticker: isCrypto ? assetTicker : undefined,
+          quantity: isCrypto ? parseFloat(assetQuantity) : undefined,
         });
       }
 
@@ -288,6 +308,8 @@ export function Config() {
     setAssetAmount(String(asset.amount));
     setAssetCurrency(asset.currency);
     setAssetType(asset.type);
+    setAssetTicker(asset.ticker || 'BTC');
+    setAssetQuantity(asset.quantity ? String(asset.quantity) : '');
     setEditingAsset(asset.id!);
     setShowAssetModal(true);
   };
@@ -334,6 +356,12 @@ export function Config() {
           <div className="space-y-3">
             {assets.map((asset) => {
               const typeInfo = ASSET_TYPES.find(t => t.value === asset.type);
+              const isCrypto = asset.type === 'crypto' && asset.ticker && asset.quantity;
+              const cryptoValue = isCrypto && cryptoPrices
+                ? asset.quantity! * (cryptoPrices[asset.ticker!] || 0)
+                : 0;
+              const tickerInfo = isCrypto ? CRYPTO_TICKERS.find(t => t.value === asset.ticker) : null;
+
               return (
                 <div
                   key={asset.id}
@@ -341,16 +369,21 @@ export function Config() {
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg">
-                      {typeInfo?.icon || '💰'}
+                      {isCrypto ? tickerInfo?.icon || '₿' : typeInfo?.icon || '💰'}
                     </div>
                     <div>
                       <p className="font-medium text-slate-900">{asset.name}</p>
-                      <p className="text-xs text-slate-500">{typeInfo?.label || asset.type}</p>
+                      <p className="text-xs text-slate-500">
+                        {isCrypto ? `${asset.quantity} ${asset.ticker}` : typeInfo?.label || asset.type}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`font-semibold ${asset.currency === 'USD' ? 'text-blue-600' : 'text-slate-900'}`}>
-                      {formatCurrency(asset.amount, asset.currency)}
+                    <span className={`font-semibold ${isCrypto || asset.currency === 'USD' ? 'text-blue-600' : 'text-slate-900'}`}>
+                      {isCrypto
+                        ? formatCurrency(cryptoValue, 'USD')
+                        : formatCurrency(asset.amount, asset.currency)
+                      }
                     </span>
                     <button
                       onClick={() => handleEditAsset(asset)}
@@ -734,36 +767,6 @@ export function Config() {
         title={editingAsset ? 'Editar Activo' : 'Agregar Activo'}
       >
         <div className="space-y-4">
-          <Input
-            label="Nombre"
-            value={assetName}
-            onChange={(e) => setAssetName(e.target.value)}
-            placeholder="Ej: Cuenta Banco Galicia"
-          />
-
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <Input
-                label="Monto"
-                type="number"
-                value={assetAmount}
-                onChange={(e) => setAssetAmount(e.target.value)}
-                placeholder="0"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 mb-1.5">Moneda</label>
-              <Toggle
-                options={[
-                  { value: 'ARS', label: 'ARS' },
-                  { value: 'USD', label: 'USD' },
-                ]}
-                value={assetCurrency}
-                onChange={setAssetCurrency}
-              />
-            </div>
-          </div>
-
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-1.5">Tipo</label>
             <select
@@ -778,6 +781,86 @@ export function Config() {
               ))}
             </select>
           </div>
+
+          {assetType === 'crypto' ? (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1.5">Criptomoneda</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {CRYPTO_TICKERS.map((ticker) => (
+                    <button
+                      key={ticker.value}
+                      type="button"
+                      onClick={() => setAssetTicker(ticker.value)}
+                      className={`p-3 rounded-xl border-2 transition-all flex items-center gap-2 ${
+                        assetTicker === ticker.value
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="text-xl">{ticker.icon}</span>
+                      <span className={`font-medium ${assetTicker === ticker.value ? 'text-blue-600' : 'text-slate-700'}`}>
+                        {ticker.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <Input
+                label="Cantidad"
+                type="number"
+                step="0.00000001"
+                value={assetQuantity}
+                onChange={(e) => setAssetQuantity(e.target.value)}
+                placeholder="0.00000000"
+              />
+
+              {cryptoPrices && assetQuantity && parseFloat(assetQuantity) > 0 && (
+                <div className="p-3 bg-slate-50 rounded-xl">
+                  <p className="text-sm text-slate-500">Valor actual</p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    ${formatNumber(parseFloat(assetQuantity) * (cryptoPrices[assetTicker] || 0))} USD
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    1 {assetTicker} = ${formatNumber(cryptoPrices[assetTicker] || 0)} USD
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <Input
+                label="Nombre"
+                value={assetName}
+                onChange={(e) => setAssetName(e.target.value)}
+                placeholder="Ej: Cuenta Banco Galicia"
+              />
+
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <Input
+                    label="Monto"
+                    type="number"
+                    value={assetAmount}
+                    onChange={(e) => setAssetAmount(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1.5">Moneda</label>
+                  <Toggle
+                    options={[
+                      { value: 'ARS', label: 'ARS' },
+                      { value: 'USD', label: 'USD' },
+                    ]}
+                    value={assetCurrency}
+                    onChange={setAssetCurrency}
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           <Button onClick={handleAddAsset} className="w-full" size="lg">
             {editingAsset ? 'Actualizar' : 'Guardar'}

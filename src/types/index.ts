@@ -98,12 +98,16 @@ export interface AppSettings {
 // Assets / Patrimony
 export type AssetType = 'efectivo' | 'banco' | 'inversiones' | 'crypto' | 'otros';
 
+export type CryptoTicker = 'BTC' | 'ETH';
+
 export interface Asset {
   id?: number;
   name: string;
   type: AssetType;
   amount: number;
   currency: Currency;
+  ticker?: CryptoTicker;
+  quantity?: number;
   createdAt: Date;
   updatedAt: Date;
 }

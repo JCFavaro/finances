@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import type { Asset, Currency, AssetType } from '../../types';
+import { getCryptoPrices, type CryptoPrices } from '../../services/cryptoPrices';
+import type { Asset, Currency, AssetType, CryptoTicker } from '../../types';
 import type { ExchangeRate } from '../../services/exchangeRate';
 
 interface AssetRow {
@@ -11,6 +12,8 @@ interface AssetRow {
   type: string;
   amount: number;
   currency: string;
+  ticker: string | null;
+  quantity: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -22,6 +25,8 @@ function rowToAsset(row: AssetRow): Asset {
     type: row.type as AssetType,
     amount: row.amount,
     currency: row.currency as Currency,
+    ticker: row.ticker as CryptoTicker | undefined,
+    quantity: row.quantity ?? undefined,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -33,6 +38,11 @@ export const ASSET_TYPES: { value: AssetType; label: string; icon: string }[] = 
   { value: 'inversiones', label: 'Inversiones', icon: '📈' },
   { value: 'crypto', label: 'Crypto', icon: '₿' },
   { value: 'otros', label: 'Otros', icon: '💰' },
+];
+
+export const CRYPTO_TICKERS: { value: CryptoTicker; label: string; icon: string }[] = [
+  { value: 'BTC', label: 'Bitcoin', icon: '₿' },
+  { value: 'ETH', label: 'Ethereum', icon: 'Ξ' },
 ];
 
 export function useAssets() {
@@ -80,26 +90,50 @@ export function useAssets() {
   return assets;
 }
 
+export function useCryptoPrices() {
+  const [prices, setPrices] = useState<CryptoPrices | undefined>(undefined);
+
+  useEffect(() => {
+    getCryptoPrices().then(setPrices);
+  }, []);
+
+  return prices;
+}
+
 export function useAssetsSummary(exchangeRate?: ExchangeRate) {
   const assets = useAssets();
+  const cryptoPrices = useCryptoPrices();
 
   if (!assets) return undefined;
 
-  const totalARS = assets
+  // Calculate crypto assets value in USD
+  const cryptoAssets = assets.filter(a => a.type === 'crypto' && a.ticker && a.quantity);
+  const totalCryptoUSD = cryptoAssets.reduce((sum, a) => {
+    if (!cryptoPrices || !a.ticker || !a.quantity) return sum;
+    const price = cryptoPrices[a.ticker] ?? 0;
+    return sum + (a.quantity * price);
+  }, 0);
+
+  // Non-crypto assets
+  const nonCryptoAssets = assets.filter(a => a.type !== 'crypto');
+
+  const totalARS = nonCryptoAssets
     .filter(a => a.currency === 'ARS')
     .reduce((sum, a) => sum + a.amount, 0);
 
-  const totalUSD = assets
+  const totalUSD = nonCryptoAssets
     .filter(a => a.currency === 'USD')
-    .reduce((sum, a) => sum + a.amount, 0);
+    .reduce((sum, a) => sum + a.amount, 0) + totalCryptoUSD;
 
   const totalUnifiedARS = totalARS + (exchangeRate ? totalUSD * exchangeRate.venta : 0);
 
   return {
     totalARS,
     totalUSD,
+    totalCryptoUSD,
     totalUnifiedARS,
     count: assets.length,
+    cryptoPrices,
   };
 }
 
@@ -115,6 +149,8 @@ export async function addAsset(
       type: data.type,
       amount: data.amount,
       currency: data.currency,
+      ticker: data.ticker ?? null,
+      quantity: data.quantity ?? null,
     })
     .select('id')
     .single();
@@ -137,6 +173,8 @@ export async function updateAsset(
   if (data.type !== undefined) updates.type = data.type;
   if (data.amount !== undefined) updates.amount = data.amount;
   if (data.currency !== undefined) updates.currency = data.currency;
+  if (data.ticker !== undefined) updates.ticker = data.ticker;
+  if (data.quantity !== undefined) updates.quantity = data.quantity;
 
   const { error } = await supabase
     .from('assets')
