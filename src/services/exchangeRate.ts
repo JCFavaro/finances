@@ -1,4 +1,3 @@
-import { db } from '../db/database';
 import type { DolarApiResponse } from '../types';
 import { CACHE_DURATION_MS, DOLAR_API_URL } from '../utils/constants';
 
@@ -7,10 +6,39 @@ export interface ExchangeRate {
   venta: number;
 }
 
-export async function getDolarBlue(): Promise<ExchangeRate> {
-  const cached = await db.exchangeRate.get('dolar-blue');
+interface CachedRate extends ExchangeRate {
+  fetchedAt: number;
+}
 
-  if (cached && Date.now() - cached.fetchedAt.getTime() < CACHE_DURATION_MS) {
+const STORAGE_KEY = 'exchange-rate-cache';
+
+function getCachedRate(): CachedRate | null {
+  try {
+    const cached = localStorage.getItem(STORAGE_KEY);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return null;
+}
+
+function setCachedRate(rate: ExchangeRate): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      ...rate,
+      fetchedAt: Date.now(),
+    }));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export async function getDolarBlue(): Promise<ExchangeRate> {
+  const cached = getCachedRate();
+
+  if (cached && Date.now() - cached.fetchedAt < CACHE_DURATION_MS) {
     return { compra: cached.compra, venta: cached.venta };
   }
 
@@ -21,15 +49,11 @@ export async function getDolarBlue(): Promise<ExchangeRate> {
     }
 
     const data: DolarApiResponse = await response.json();
+    const rate = { compra: data.compra, venta: data.venta };
 
-    await db.exchangeRate.put({
-      id: 'dolar-blue',
-      compra: data.compra,
-      venta: data.venta,
-      fetchedAt: new Date()
-    });
+    setCachedRate(rate);
 
-    return { compra: data.compra, venta: data.venta };
+    return rate;
   } catch (error) {
     if (cached) {
       return { compra: cached.compra, venta: cached.venta };

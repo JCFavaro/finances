@@ -8,7 +8,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { exchangeRate, isOnline } = useApp();
+  const { exchangeRate } = useApp();
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -19,11 +19,6 @@ export function Layout({ children }: LayoutProps) {
             <h1 className="text-xl font-bold text-slate-900">Finanzas</h1>
           </div>
           <div className="flex items-center gap-3">
-            {!isOnline && (
-              <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">
-                Offline
-              </span>
-            )}
             {exchangeRate && (
               <div className="text-right">
                 <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Dólar Blue</div>

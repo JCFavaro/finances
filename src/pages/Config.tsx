@@ -1,29 +1,28 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
 import { Toggle } from '../components/ui/Toggle';
 import { useApp } from '../context/AppContext';
-import { useRecurringIncomes, addRecurringIncome, deleteRecurringIncome, toggleRecurringIncomeActive } from '../db/hooks/useRecurringIncome';
-import { useRecurringExpenses, addRecurringExpense, deleteRecurringExpense, toggleRecurringExpenseActive } from '../db/hooks/useRecurringExpenses';
-import { useShortcuts, addShortcut, updateShortcut, deleteShortcut } from '../db/hooks/useShortcuts';
-import { useBudgets, addBudget, updateBudget, deleteBudget, toggleBudgetActive } from '../db/hooks/useBudgets';
-import { useAssets, addAsset, updateAsset, deleteAsset, ASSET_TYPES } from '../db/hooks/useAssets';
-import { exportData, importData, downloadAsFile } from '../services/exportImport';
-import { clearAllData } from '../db/database';
+import { useAuth } from '../context/AuthContext';
+import { useRecurringIncomes, addRecurringIncome, deleteRecurringIncome, toggleRecurringIncomeActive } from '../db/supabase/useRecurringIncomes';
+import { useRecurringExpenses, addRecurringExpense, deleteRecurringExpense, toggleRecurringExpenseActive } from '../db/supabase/useRecurringExpenses';
+import { useShortcuts, addShortcut, updateShortcut, deleteShortcut } from '../db/supabase/useShortcuts';
+import { useBudgets, addBudget, updateBudget, deleteBudget, toggleBudgetActive } from '../db/supabase/useBudgets';
+import { useAssets, addAsset, updateAsset, deleteAsset, ASSET_TYPES } from '../db/supabase/useAssets';
 import { formatNumber, formatCurrency } from '../utils/currency';
 import { INCOME_CATEGORIES, EXPENSE_CATEGORIES, COMMON_ICONS } from '../utils/constants';
 import type { Currency, IncomeCategory, ExpenseCategory, AssetType } from '../types';
 
 export function Config() {
   const { exchangeRate, refreshExchangeRate } = useApp();
+  const { user, signOut } = useAuth();
   const recurringIncomes = useRecurringIncomes();
   const recurringExpenses = useRecurringExpenses();
   const shortcuts = useShortcuts();
   const budgets = useBudgets();
   const assets = useAssets();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showAssetModal, setShowAssetModal] = useState(false);
@@ -33,8 +32,7 @@ export function Config() {
   const [editingAsset, setEditingAsset] = useState<number | null>(null);
   const [editingShortcut, setEditingShortcut] = useState<number | null>(null);
   const [editingBudget, setEditingBudget] = useState<number | null>(null);
-  const [isExporting, setIsExporting] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Form state for recurring income
   const [name, setName] = useState('');
@@ -69,46 +67,22 @@ export function Config() {
   const [assetCurrency, setAssetCurrency] = useState<Currency>('ARS');
   const [assetType, setAssetType] = useState<AssetType>('banco');
 
-  const handleExport = async () => {
-    setIsExporting(true);
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
     try {
-      const data = await exportData();
-      const filename = `finanzas-backup-${new Date().toISOString().split('T')[0]}.json`;
-      downloadAsFile(data, filename);
+      await signOut();
     } catch (error) {
-      console.error('Export error:', error);
-      alert('Error al exportar datos');
+      console.error('Logout error:', error);
     } finally {
-      setIsExporting(false);
-    }
-  };
-
-  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsImporting(true);
-    try {
-      const text = await file.text();
-      await importData(text);
-      alert('Datos importados correctamente');
-      window.location.reload();
-    } catch (error) {
-      console.error('Import error:', error);
-      alert('Error al importar datos. Verifica el formato del archivo.');
-    } finally {
-      setIsImporting(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      setIsLoggingOut(false);
     }
   };
 
   const handleAddRecurring = async () => {
-    if (!name || !amount || parseFloat(amount) <= 0) return;
+    if (!name || !amount || parseFloat(amount) <= 0 || !user) return;
 
     try {
-      await addRecurringIncome({
+      await addRecurringIncome(user.id, {
         name,
         amount: parseFloat(amount),
         currency,
@@ -145,10 +119,10 @@ export function Config() {
   };
 
   const handleAddRecurringExpense = async () => {
-    if (!expenseName || !expenseAmount || parseFloat(expenseAmount) <= 0) return;
+    if (!expenseName || !expenseAmount || parseFloat(expenseAmount) <= 0 || !user) return;
 
     try {
-      await addRecurringExpense({
+      await addRecurringExpense(user.id, {
         name: expenseName,
         icon: expenseIcon,
         amount: parseFloat(expenseAmount),
@@ -182,7 +156,7 @@ export function Config() {
   };
 
   const handleAddShortcut = async () => {
-    if (!shortcutName || !shortcutAmount || parseFloat(shortcutAmount) <= 0) return;
+    if (!shortcutName || !shortcutAmount || parseFloat(shortcutAmount) <= 0 || !user) return;
 
     try {
       if (editingShortcut) {
@@ -194,7 +168,7 @@ export function Config() {
           category: shortcutCategory,
         });
       } else {
-        await addShortcut({
+        await addShortcut(user.id, {
           name: shortcutName,
           icon: shortcutIcon,
           amount: parseFloat(shortcutAmount),
@@ -235,7 +209,7 @@ export function Config() {
   };
 
   const handleAddBudget = async () => {
-    if (!budgetAmount || parseFloat(budgetAmount) <= 0) return;
+    if (!budgetAmount || parseFloat(budgetAmount) <= 0 || !user) return;
 
     try {
       if (editingBudget) {
@@ -245,7 +219,7 @@ export function Config() {
           currency: budgetCurrency,
         });
       } else {
-        await addBudget({
+        await addBudget(user.id, {
           category: budgetCategory,
           amount: parseFloat(budgetAmount),
           currency: budgetCurrency,
@@ -283,7 +257,7 @@ export function Config() {
   };
 
   const handleAddAsset = async () => {
-    if (!assetName || !assetAmount || parseFloat(assetAmount) < 0) return;
+    if (!assetName || !assetAmount || parseFloat(assetAmount) < 0 || !user) return;
 
     try {
       if (editingAsset) {
@@ -294,7 +268,7 @@ export function Config() {
           type: assetType,
         });
       } else {
-        await addAsset({
+        await addAsset(user.id, {
           name: assetName,
           amount: parseFloat(assetAmount),
           currency: assetCurrency,
@@ -321,15 +295,6 @@ export function Config() {
   const handleDeleteAsset = async (id: number) => {
     if (confirm('¿Eliminar este activo?')) {
       await deleteAsset(id);
-    }
-  };
-
-  const handleClearAll = async () => {
-    if (confirm('¿Estás seguro? Se eliminarán TODOS los datos. Esta acción no se puede deshacer.')) {
-      if (confirm('¿CONFIRMAR eliminación de todos los datos?')) {
-        await clearAllData();
-        window.location.reload();
-      }
     }
   };
 
@@ -676,42 +641,23 @@ export function Config() {
         )}
       </Card>
 
-      {/* Backup */}
+      {/* Account */}
       <Card>
-        <h3 className="font-semibold text-slate-900 mb-4">Backup</h3>
-        <div className="flex gap-3">
+        <h3 className="font-semibold text-slate-900 mb-4">Cuenta</h3>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between py-2">
+            <span className="text-sm text-slate-600">Email</span>
+            <span className="text-sm font-medium text-slate-900">{user?.email}</span>
+          </div>
           <Button
             variant="secondary"
-            onClick={handleExport}
-            disabled={isExporting}
-            className="flex-1"
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            className="w-full"
           >
-            {isExporting ? 'Exportando...' : 'Exportar JSON'}
+            {isLoggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
           </Button>
-          <Button
-            variant="secondary"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isImporting}
-            className="flex-1"
-          >
-            {isImporting ? 'Importando...' : 'Importar JSON'}
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleImport}
-            className="hidden"
-          />
         </div>
-      </Card>
-
-      {/* Danger Zone */}
-      <Card className="!border-red-200 !bg-red-50/50">
-        <h3 className="font-semibold text-red-600 mb-4">Zona de peligro</h3>
-        <Button variant="danger" onClick={handleClearAll} className="w-full">
-          Eliminar todos los datos
-        </Button>
       </Card>
 
       {/* Add Recurring Modal */}

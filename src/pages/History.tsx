@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { TransactionList } from '../components/transactions/TransactionList';
-import { useTransactions, useMonthSummary, deleteTransaction } from '../db/hooks/useTransactions';
+import { useTransactions, useMonthSummary, deleteTransaction } from '../db/supabase/useTransactions';
 import { formatCurrency } from '../utils/currency';
 import type { MonthYearFilter } from '../types';
 

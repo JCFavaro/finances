@@ -4,11 +4,12 @@ import { Card } from '../components/ui/Card';
 import { CategoryPieChart } from '../components/charts/CategoryPieChart';
 import { IncomeExpenseBarChart } from '../components/charts/IncomeExpenseBarChart';
 import { TransactionList } from '../components/transactions/TransactionList';
-import { useMonthSummary, useCategoryStats, useTransactions, useMonthlyStats, addTransaction } from '../db/hooks/useTransactions';
-import { useAssetsSummary } from '../db/hooks/useAssets';
-import { useShortcuts } from '../db/hooks/useShortcuts';
-import { useBudgetProgress } from '../db/hooks/useBudgets';
+import { useMonthSummary, useCategoryStats, useTransactions, useMonthlyStats, addTransaction } from '../db/supabase/useTransactions';
+import { useAssetsSummary } from '../db/supabase/useAssets';
+import { useShortcuts } from '../db/supabase/useShortcuts';
+import { useBudgetProgress } from '../db/supabase/useBudgets';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { formatCurrency } from '../utils/currency';
 import { convertToARS } from '../services/exchangeRate';
 import { CATEGORY_COLORS, EXPENSE_CATEGORIES } from '../utils/constants';
@@ -21,6 +22,7 @@ const MONTHS = [
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { exchangeRate } = useApp();
   const now = new Date();
   const [filter, setFilter] = useState<MonthYearFilter>({
@@ -38,12 +40,12 @@ export function Dashboard() {
   const [shortcutFeedback, setShortcutFeedback] = useState<number | null>(null);
 
   const handleShortcutClick = async (shortcut: NonNullable<typeof shortcuts>[0]) => {
-    if (!exchangeRate) return;
+    if (!exchangeRate || !user) return;
 
     try {
       const amountARS = convertToARS(shortcut.amount, shortcut.currency, exchangeRate);
 
-      await addTransaction({
+      await addTransaction(user.id, {
         type: 'expense',
         amount: shortcut.amount,
         currency: shortcut.currency,

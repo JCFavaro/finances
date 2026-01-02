@@ -3,19 +3,21 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Toggle } from '../components/ui/Toggle';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { addTransaction, updateTransaction } from '../db/hooks/useTransactions';
+import { addTransaction, updateTransaction } from '../db/supabase/useTransactions';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
 import { convertToARS } from '../services/exchangeRate';
 import { triggerHaptic } from '../services/haptics';
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '../utils/constants';
 import { parseLocalDate, toInputDate } from '../utils/date';
-import { db } from '../db/database';
 import type { TransactionType, Currency, Category } from '../types';
 
 export function AddTransaction() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { exchangeRate } = useApp();
+  const { user } = useAuth();
 
   const editId = searchParams.get('edit');
   const isEditMode = !!editId;
@@ -32,24 +34,29 @@ export function AddTransaction() {
   // Load transaction for editing
   useEffect(() => {
     if (editId) {
-      db.transactions.get(Number(editId)).then((tx) => {
-        if (tx) {
-          setType(tx.type);
-          setAmount(String(tx.amount));
-          setCurrency(tx.currency);
-          setCategory(tx.category);
-          setDescription(tx.description || '');
-          setDate(toInputDate(new Date(tx.date)));
-          if (tx.description) setShowDescription(true);
-        }
-      });
+      supabase
+        .from('transactions')
+        .select('*')
+        .eq('id', Number(editId))
+        .single()
+        .then(({ data: tx }) => {
+          if (tx) {
+            setType(tx.type);
+            setAmount(String(tx.amount));
+            setCurrency(tx.currency as Currency);
+            setCategory(tx.category as Category);
+            setDescription(tx.description || '');
+            setDate(toInputDate(new Date(tx.date)));
+            if (tx.description) setShowDescription(true);
+          }
+        });
     }
   }, [editId]);
 
   const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
 
   const handleSubmit = async () => {
-    if (!amount || !category || parseFloat(amount) <= 0) return;
+    if (!amount || !category || parseFloat(amount) <= 0 || !user) return;
 
     setIsSubmitting(true);
 
@@ -71,7 +78,7 @@ export function AddTransaction() {
           exchangeRateUsed: currency === 'USD' ? rate.venta : undefined,
         });
       } else {
-        await addTransaction({
+        await addTransaction(user.id, {
           type,
           amount: parsedAmount,
           currency,

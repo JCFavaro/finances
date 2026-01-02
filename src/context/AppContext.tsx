@@ -1,12 +1,10 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import { getDolarBlue, type ExchangeRate } from '../services/exchangeRate';
 import { processRecurringIncomes, processRecurringExpenses } from '../services/recurringProcessor';
-import { initializeSettings } from '../db/database';
-import { useOfflineStatus } from '../hooks/useOfflineStatus';
+import { useAuth } from './AuthContext';
 
 interface AppContextType {
   exchangeRate: ExchangeRate | null;
-  isOnline: boolean;
   isLoading: boolean;
   refreshExchangeRate: () => Promise<void>;
 }
@@ -14,9 +12,9 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [exchangeRate, setExchangeRate] = useState<ExchangeRate | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const isOnline = useOfflineStatus();
 
   const refreshExchangeRate = useCallback(async () => {
     try {
@@ -29,12 +27,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     async function initialize() {
+      if (!user) return;
+
       setIsLoading(true);
       try {
-        await initializeSettings();
         await refreshExchangeRate();
-        await processRecurringIncomes();
-        await processRecurringExpenses();
+        await processRecurringIncomes(user.id);
+        await processRecurringExpenses(user.id);
       } catch (error) {
         console.error('Initialization error:', error);
       } finally {
@@ -43,10 +42,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     initialize();
-  }, [refreshExchangeRate]);
+  }, [user, refreshExchangeRate]);
 
   return (
-    <AppContext.Provider value={{ exchangeRate, isOnline, isLoading, refreshExchangeRate }}>
+    <AppContext.Provider value={{ exchangeRate, isLoading, refreshExchangeRate }}>
       {children}
     </AppContext.Provider>
   );
