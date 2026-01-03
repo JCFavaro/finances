@@ -22,7 +22,7 @@ export function Layout({ children }: LayoutProps) {
           <div className="flex items-center gap-3">
             {exchangeRate && (
               <div className="text-right">
-                <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Dólar Blue</div>
+                <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Dólar MEP</div>
                 <div className="text-sm font-semibold text-slate-700">
                   ${formatNumber(exchangeRate.venta)}
                 </div>

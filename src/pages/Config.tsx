@@ -449,7 +449,7 @@ export function Config() {
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-slate-900">Dólar Blue</h3>
+              <h3 className="font-semibold text-slate-900">Dólar MEP</h3>
               {exchangeRate === null && (
                 <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
