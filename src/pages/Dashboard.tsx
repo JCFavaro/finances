@@ -137,7 +137,15 @@ export function Dashboard() {
       {/* Balance Card - Hero */}
       <Card padding="lg">
         <div className="text-center">
-          <p className="text-sm font-medium text-slate-500 mb-2">Balance del mes</p>
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <p className="text-sm font-medium text-slate-500">Balance del mes</p>
+            {summary === undefined && (
+              <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
           <p className={`text-4xl font-bold tracking-tight ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
             {formatCurrency(balance)}
           </p>
@@ -204,11 +212,27 @@ export function Dashboard() {
       {/* Quick Stats */}
       <div className="grid grid-cols-2 gap-3">
         <Card padding="sm">
-          <p className="text-xs font-medium text-slate-500 mb-1">Transacciones</p>
+          <div className="flex items-center gap-1.5 mb-1">
+            <p className="text-xs font-medium text-slate-500">Transacciones</p>
+            {transactions === undefined && (
+              <svg className="w-3 h-3 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
           <p className="text-2xl font-bold text-slate-900">{transactions?.length ?? 0}</p>
         </Card>
         <Card padding="sm">
-          <p className="text-xs font-medium text-slate-500 mb-1">Promedio/día</p>
+          <div className="flex items-center gap-1.5 mb-1">
+            <p className="text-xs font-medium text-slate-500">Promedio/día</p>
+            {summary === undefined && (
+              <svg className="w-3 h-3 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
           <p className="text-2xl font-bold text-slate-900">
             {formatCurrency((summary?.expenses ?? 0) / 30)}
           </p>
@@ -219,7 +243,15 @@ export function Dashboard() {
       {assetsSummary && assetsSummary.count > 0 && (
         <Card>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-900">Patrimonio</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900">Patrimonio</h3>
+              {assetsSummary.isLoadingPrices && (
+                <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              )}
+            </div>
             <button
               onClick={() => navigate('/config')}
               className="text-sm font-medium text-blue-600 hover:text-blue-700"
@@ -236,11 +268,13 @@ export function Dashboard() {
                 </span>
               </div>
             )}
-            {assetsSummary.totalUSD > 0 && (
+            {(assetsSummary.totalUSD > 0 || assetsSummary.isLoadingPrices) && (
               <div className="flex justify-between items-center">
                 <span className="text-sm text-slate-500">Dólares</span>
-                <span className="font-semibold text-blue-600">
-                  {formatCurrency(assetsSummary.totalUSD, 'USD')}
+                <span className={`font-semibold text-blue-600 ${assetsSummary.isLoadingPrices && assetsSummary.totalUSD === 0 ? 'animate-pulse' : ''}`}>
+                  {assetsSummary.isLoadingPrices && assetsSummary.totalUSD === 0
+                    ? '...'
+                    : formatCurrency(assetsSummary.totalUSD, 'USD')}
                 </span>
               </div>
             )}
@@ -262,9 +296,17 @@ export function Dashboard() {
 
       {/* Category Pie Chart */}
       <Card>
-        <h3 className="text-sm font-semibold text-slate-900 mb-4">
-          Gastos por categoría
-        </h3>
+        <div className="flex items-center gap-2 mb-4">
+          <h3 className="text-sm font-semibold text-slate-900">
+            Gastos por categoría
+          </h3>
+          {categoryStats === undefined && (
+            <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          )}
+        </div>
         <CategoryPieChart data={categoryChartData} />
       </Card>
 
@@ -322,18 +364,34 @@ export function Dashboard() {
 
       {/* Monthly Bar Chart */}
       <Card>
-        <h3 className="text-sm font-semibold text-slate-900 mb-4">
-          Últimos 6 meses
-        </h3>
+        <div className="flex items-center gap-2 mb-4">
+          <h3 className="text-sm font-semibold text-slate-900">
+            Últimos 6 meses
+          </h3>
+          {monthlyStats === undefined && (
+            <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          )}
+        </div>
         <IncomeExpenseBarChart data={monthlyStats ?? []} />
       </Card>
 
       {/* Recent Transactions */}
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-slate-900">
-            Transacciones recientes
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">
+              Transacciones recientes
+            </h3>
+            {transactions === undefined && (
+              <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
           {transactions && transactions.length > 0 && (
             <button
               onClick={() => navigate('/history')}

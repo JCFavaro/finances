@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -10,10 +10,29 @@ import { useRecurringIncomes, addRecurringIncome, deleteRecurringIncome, toggleR
 import { useRecurringExpenses, addRecurringExpense, deleteRecurringExpense, toggleRecurringExpenseActive } from '../db/supabase/useRecurringExpenses';
 import { useShortcuts, addShortcut, updateShortcut, deleteShortcut } from '../db/supabase/useShortcuts';
 import { useBudgets, addBudget, updateBudget, deleteBudget, toggleBudgetActive } from '../db/supabase/useBudgets';
-import { useAssets, addAsset, updateAsset, deleteAsset, ASSET_TYPES, CRYPTO_TICKERS, useCryptoPrices } from '../db/supabase/useAssets';
+import { useAssets, addAsset, updateAsset, deleteAsset, ASSET_TYPES, useAssetPrices } from '../db/supabase/useAssets';
+import { searchCrypto, getCryptoPrices, type CoinInfo } from '../services/cryptoPrices';
+import { searchCedear, validateCedear } from '../services/cedearPrices';
 import { formatNumber, formatCurrency } from '../utils/currency';
 import { INCOME_CATEGORIES, EXPENSE_CATEGORIES, COMMON_ICONS } from '../utils/constants';
-import type { Currency, IncomeCategory, ExpenseCategory, AssetType, CryptoTicker } from '../types';
+import type { Currency, IncomeCategory, ExpenseCategory, AssetType } from '../types';
+
+// Debounce hook
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
 
 export function Config() {
   const { exchangeRate, refreshExchangeRate } = useApp();
@@ -23,6 +42,7 @@ export function Config() {
   const shortcuts = useShortcuts();
   const budgets = useBudgets();
   const assets = useAssets();
+  const { cryptoPrices, cedearPrices, isLoadingPrices } = useAssetPrices(assets);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showAssetModal, setShowAssetModal] = useState(false);
@@ -66,10 +86,82 @@ export function Config() {
   const [assetAmount, setAssetAmount] = useState('');
   const [assetCurrency, setAssetCurrency] = useState<Currency>('ARS');
   const [assetType, setAssetType] = useState<AssetType>('banco');
-  const [assetTicker, setAssetTicker] = useState<CryptoTicker>('BTC');
   const [assetQuantity, setAssetQuantity] = useState('');
+  const [assetPurchasePrice, setAssetPurchasePrice] = useState('');
 
-  const cryptoPrices = useCryptoPrices();
+  // Ticker search state
+  const [tickerSearch, setTickerSearch] = useState('');
+  const [tickerSearchResults, setTickerSearchResults] = useState<CoinInfo[]>([]);
+  const [cedearSearchResults, setCedearSearchResults] = useState<{ symbol: string; name: string }[]>([]);
+  const [selectedTicker, setSelectedTicker] = useState<{ id: string; symbol: string; name: string } | null>(null);
+  const [selectedCedear, setSelectedCedear] = useState<{ symbol: string; name: string; currency: string } | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [previewPrice, setPreviewPrice] = useState<number | null>(null);
+
+  const debouncedTickerSearch = useDebounce(tickerSearch, 300);
+
+  // Search crypto when input changes
+  useEffect(() => {
+    if (assetType !== 'crypto') return;
+    if (!debouncedTickerSearch || debouncedTickerSearch.length < 2) {
+      setTickerSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    searchCrypto(debouncedTickerSearch)
+      .then(results => {
+        setTickerSearchResults(results);
+      })
+      .finally(() => setIsSearching(false));
+  }, [debouncedTickerSearch, assetType]);
+
+  // Search CEDEAR when input changes
+  useEffect(() => {
+    if (assetType !== 'cedear') return;
+    const results = searchCedear(debouncedTickerSearch);
+    setCedearSearchResults(results);
+  }, [debouncedTickerSearch, assetType]);
+
+  // Fetch price preview when ticker is selected
+  useEffect(() => {
+    if (selectedTicker && assetQuantity) {
+      getCryptoPrices([selectedTicker.id]).then(prices => {
+        const price = prices[selectedTicker.id];
+        if (price) {
+          setPreviewPrice(price * parseFloat(assetQuantity || '0'));
+        }
+      });
+    } else {
+      setPreviewPrice(null);
+    }
+  }, [selectedTicker, assetQuantity]);
+
+  const handleSelectCrypto = useCallback(async (coin: CoinInfo) => {
+    setSelectedTicker({ id: coin.id, symbol: coin.symbol, name: coin.name });
+    setTickerSearch(coin.symbol);
+    setTickerSearchResults([]);
+    setValidationError(null);
+  }, []);
+
+  const handleSelectCedear = useCallback(async (cedear: { symbol: string; name: string }) => {
+    setIsValidating(true);
+    setValidationError(null);
+
+    const result = await validateCedear(cedear.symbol);
+    setIsValidating(false);
+
+    if (result) {
+      setSelectedCedear({ symbol: result.symbol, name: result.name, currency: result.currency });
+      setTickerSearch(cedear.symbol.replace('.BA', ''));
+      setCedearSearchResults([]);
+      setPreviewPrice(result.price);
+    } else {
+      setValidationError('No se encontró. Verificá el símbolo.');
+    }
+  }, []);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -257,8 +349,15 @@ export function Config() {
     setAssetAmount('');
     setAssetCurrency('ARS');
     setAssetType('banco');
-    setAssetTicker('BTC');
     setAssetQuantity('');
+    setAssetPurchasePrice('');
+    setTickerSearch('');
+    setSelectedTicker(null);
+    setSelectedCedear(null);
+    setTickerSearchResults([]);
+    setCedearSearchResults([]);
+    setValidationError(null);
+    setPreviewPrice(null);
     setEditingAsset(null);
   };
 
@@ -267,32 +366,46 @@ export function Config() {
 
     // Validate based on type
     if (assetType === 'crypto') {
-      if (!assetQuantity || parseFloat(assetQuantity) <= 0) return;
+      if (!selectedTicker || !assetQuantity || parseFloat(assetQuantity) <= 0) {
+        setValidationError('Seleccioná una crypto y cantidad válida');
+        return;
+      }
+    } else if (assetType === 'cedear') {
+      if (!selectedCedear || !assetQuantity || parseFloat(assetQuantity) <= 0) {
+        setValidationError('Seleccioná un CEDEAR y cantidad válida');
+        return;
+      }
     } else {
       if (!assetName || !assetAmount || parseFloat(assetAmount) < 0) return;
     }
 
     try {
       const isCrypto = assetType === 'crypto';
-      const tickerInfo = CRYPTO_TICKERS.find(t => t.value === assetTicker);
+      const isCedear = assetType === 'cedear';
+
+      const cedearCurrency = selectedCedear?.currency === 'ARS' ? 'ARS' : 'USD';
+
+      const purchasePrice = assetPurchasePrice ? parseFloat(assetPurchasePrice) : undefined;
 
       if (editingAsset) {
         await updateAsset(editingAsset, {
-          name: isCrypto ? tickerInfo?.label || assetTicker : assetName,
-          amount: isCrypto ? 0 : parseFloat(assetAmount),
-          currency: isCrypto ? 'USD' : assetCurrency,
+          name: isCrypto ? selectedTicker!.name : isCedear ? selectedCedear!.name : assetName,
+          amount: isCrypto || isCedear ? 0 : parseFloat(assetAmount),
+          currency: isCrypto ? 'USD' : isCedear ? cedearCurrency : assetCurrency,
           type: assetType,
-          ticker: isCrypto ? assetTicker : undefined,
-          quantity: isCrypto ? parseFloat(assetQuantity) : undefined,
+          ticker: isCrypto ? selectedTicker!.id : isCedear ? selectedCedear!.symbol : undefined,
+          quantity: isCrypto || isCedear ? parseFloat(assetQuantity) : undefined,
+          purchasePrice: isCrypto || isCedear ? purchasePrice : undefined,
         });
       } else {
         await addAsset(user.id, {
-          name: isCrypto ? tickerInfo?.label || assetTicker : assetName,
-          amount: isCrypto ? 0 : parseFloat(assetAmount),
-          currency: isCrypto ? 'USD' : assetCurrency,
+          name: isCrypto ? selectedTicker!.name : isCedear ? selectedCedear!.name : assetName,
+          amount: isCrypto || isCedear ? 0 : parseFloat(assetAmount),
+          currency: isCrypto ? 'USD' : isCedear ? cedearCurrency : assetCurrency,
           type: assetType,
-          ticker: isCrypto ? assetTicker : undefined,
-          quantity: isCrypto ? parseFloat(assetQuantity) : undefined,
+          ticker: isCrypto ? selectedTicker!.id : isCedear ? selectedCedear!.symbol : undefined,
+          quantity: isCrypto || isCedear ? parseFloat(assetQuantity) : undefined,
+          purchasePrice: isCrypto || isCedear ? purchasePrice : undefined,
         });
       }
 
@@ -308,8 +421,17 @@ export function Config() {
     setAssetAmount(String(asset.amount));
     setAssetCurrency(asset.currency);
     setAssetType(asset.type);
-    setAssetTicker(asset.ticker || 'BTC');
     setAssetQuantity(asset.quantity ? String(asset.quantity) : '');
+    setAssetPurchasePrice(asset.purchasePrice ? String(asset.purchasePrice) : '');
+
+    if (asset.type === 'crypto' && asset.ticker) {
+      setSelectedTicker({ id: asset.ticker, symbol: asset.ticker.toUpperCase(), name: asset.name });
+      setTickerSearch(asset.ticker);
+    } else if (asset.type === 'cedear' && asset.ticker) {
+      setSelectedCedear({ symbol: asset.ticker, name: asset.name, currency: asset.currency });
+      setTickerSearch(asset.ticker.replace('.BA', ''));
+    }
+
     setEditingAsset(asset.id!);
     setShowAssetModal(true);
   };
@@ -326,7 +448,15 @@ export function Config() {
       <Card>
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-slate-900">Dólar Blue</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-slate-900">Dólar Blue</h3>
+              {exchangeRate === null && (
+                <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              )}
+            </div>
             {exchangeRate ? (
               <div className="text-sm text-slate-500 mt-1">
                 <span>Compra: ${formatNumber(exchangeRate.compra)}</span>
@@ -334,7 +464,7 @@ export function Config() {
                 <span>Venta: ${formatNumber(exchangeRate.venta)}</span>
               </div>
             ) : (
-              <p className="text-sm text-slate-400">No disponible</p>
+              <p className="text-sm text-slate-400">Cargando...</p>
             )}
           </div>
           <Button variant="secondary" size="sm" onClick={refreshExchangeRate}>
@@ -346,7 +476,15 @@ export function Config() {
       {/* Patrimonio / Assets */}
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-slate-900">Patrimonio</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-900">Patrimonio</h3>
+            {(assets === undefined || isLoadingPrices) && (
+              <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
           <Button size="sm" onClick={() => { resetAssetForm(); setShowAssetModal(true); }}>
             + Agregar
           </Button>
@@ -357,10 +495,23 @@ export function Config() {
             {assets.map((asset) => {
               const typeInfo = ASSET_TYPES.find(t => t.value === asset.type);
               const isCrypto = asset.type === 'crypto' && asset.ticker && asset.quantity;
-              const cryptoValue = isCrypto && cryptoPrices
-                ? asset.quantity! * (cryptoPrices[asset.ticker!] || 0)
+              const isCedear = asset.type === 'cedear' && asset.ticker && asset.quantity;
+              const currentPrice = isCrypto
+                ? (cryptoPrices[asset.ticker!] || 0)
+                : isCedear
+                ? (cedearPrices[asset.ticker!] || 0)
                 : 0;
-              const tickerInfo = isCrypto ? CRYPTO_TICKERS.find(t => t.value === asset.ticker) : null;
+              const currentValue = isCrypto || isCedear
+                ? asset.quantity! * currentPrice
+                : asset.amount;
+              const isLoadingPrice = (isCrypto || isCedear) && isLoadingPrices;
+
+              // Calculate gain/loss if purchasePrice exists
+              const hasPurchasePrice = (isCrypto || isCedear) && asset.purchasePrice && asset.purchasePrice > 0;
+              const costBasis = hasPurchasePrice ? asset.quantity! * asset.purchasePrice! : 0;
+              const gainLoss = hasPurchasePrice ? currentValue - costBasis : 0;
+              const gainLossPercent = hasPurchasePrice && costBasis > 0 ? (gainLoss / costBasis) * 100 : 0;
+              const isGain = gainLoss >= 0;
 
               return (
                 <div
@@ -369,22 +520,41 @@ export function Config() {
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg">
-                      {isCrypto ? tickerInfo?.icon || '₿' : typeInfo?.icon || '💰'}
+                      {typeInfo?.icon || '💰'}
                     </div>
                     <div>
                       <p className="font-medium text-slate-900">{asset.name}</p>
                       <p className="text-xs text-slate-500">
-                        {isCrypto ? `${asset.quantity} ${asset.ticker}` : typeInfo?.label || asset.type}
+                        {isCrypto
+                          ? `${asset.quantity} ${asset.ticker?.toUpperCase()}`
+                          : isCedear
+                          ? `${asset.quantity} ${asset.ticker?.replace('.BA', '')}`
+                          : typeInfo?.label || asset.type}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`font-semibold ${isCrypto || asset.currency === 'USD' ? 'text-blue-600' : 'text-slate-900'}`}>
-                      {isCrypto
-                        ? formatCurrency(cryptoValue, 'USD')
-                        : formatCurrency(asset.amount, asset.currency)
-                      }
-                    </span>
+                    {isLoadingPrice && (
+                      <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    )}
+                    <div className="text-right">
+                      <span className={`font-semibold ${isCrypto || asset.currency === 'USD' ? 'text-blue-600' : 'text-slate-900'}`}>
+                        {isCrypto
+                          ? formatCurrency(currentValue, 'USD')
+                          : isCedear
+                          ? formatCurrency(currentValue, asset.currency)
+                          : formatCurrency(asset.amount, asset.currency)
+                        }
+                      </span>
+                      {hasPurchasePrice && currentPrice > 0 && (
+                        <p className={`text-xs font-medium ${isGain ? 'text-emerald-600' : 'text-red-500'}`}>
+                          {isGain ? '+' : ''}{formatCurrency(gainLoss, isCrypto ? 'USD' : asset.currency)} ({isGain ? '+' : ''}{gainLossPercent.toFixed(1)}%)
+                        </p>
+                      )}
+                    </div>
                     <button
                       onClick={() => handleEditAsset(asset)}
                       className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
@@ -416,7 +586,15 @@ export function Config() {
       {/* Recurring Incomes */}
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-slate-900">Ingresos Recurrentes</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-900">Ingresos Recurrentes</h3>
+            {recurringIncomes === undefined && (
+              <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
           <Button size="sm" onClick={() => setShowAddModal(true)}>
             + Agregar
           </Button>
@@ -479,7 +657,15 @@ export function Config() {
       {/* Recurring Expenses */}
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-slate-900">Gastos Recurrentes</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-900">Gastos Recurrentes</h3>
+            {recurringExpenses === undefined && (
+              <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
           <Button size="sm" onClick={() => { resetExpenseForm(); setShowExpenseModal(true); }}>
             + Agregar
           </Button>
@@ -545,7 +731,15 @@ export function Config() {
       {/* Quick Shortcuts */}
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-slate-900">Accesos Rápidos</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-900">Accesos Rápidos</h3>
+            {shortcuts === undefined && (
+              <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
           <Button size="sm" onClick={() => { resetShortcutForm(); setShowShortcutModal(true); }}>
             + Agregar
           </Button>
@@ -600,7 +794,15 @@ export function Config() {
       {/* Budgets */}
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-slate-900">Presupuestos</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-900">Presupuestos</h3>
+            {budgets === undefined && (
+              <svg className="w-4 h-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+          </div>
           <Button size="sm" onClick={() => { resetBudgetForm(); setShowBudgetModal(true); }}>
             + Agregar
           </Button>
@@ -771,7 +973,16 @@ export function Config() {
             <label className="block text-sm font-medium text-slate-600 mb-1.5">Tipo</label>
             <select
               value={assetType}
-              onChange={(e) => setAssetType(e.target.value as AssetType)}
+              onChange={(e) => {
+                setAssetType(e.target.value as AssetType);
+                setTickerSearch('');
+                setSelectedTicker(null);
+                setSelectedCedear(null);
+                setTickerSearchResults([]);
+                setCedearSearchResults([]);
+                setValidationError(null);
+                setPreviewPrice(null);
+              }}
               className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
             >
               {ASSET_TYPES.map((type) => (
@@ -782,29 +993,58 @@ export function Config() {
             </select>
           </div>
 
-          {assetType === 'crypto' ? (
+          {assetType === 'crypto' && (
             <>
               <div>
-                <label className="block text-sm font-medium text-slate-600 mb-1.5">Criptomoneda</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {CRYPTO_TICKERS.map((ticker) => (
+                <label className="block text-sm font-medium text-slate-600 mb-1.5">Buscar Crypto</label>
+                <Input
+                  value={tickerSearch}
+                  onChange={(e) => {
+                    setTickerSearch(e.target.value);
+                    setSelectedTicker(null);
+                    setValidationError(null);
+                  }}
+                  placeholder="Ej: bitcoin, eth, solana..."
+                />
+                {isSearching && (
+                  <p className="text-xs text-slate-400 mt-1">Buscando...</p>
+                )}
+                {tickerSearchResults.length > 0 && !selectedTicker && (
+                  <div className="mt-2 border border-slate-200 rounded-xl overflow-hidden">
+                    {tickerSearchResults.map((coin) => (
+                      <button
+                        key={coin.id}
+                        type="button"
+                        onClick={() => handleSelectCrypto(coin)}
+                        className="w-full px-4 py-3 text-left hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors"
+                      >
+                        <span className="font-medium text-slate-900">{coin.symbol}</span>
+                        <span className="text-slate-500 ml-2">{coin.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {selectedTicker && (
+                  <div className="mt-2 p-3 bg-blue-50 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="font-medium text-blue-900">{selectedTicker.symbol}</span>
+                      <span className="text-blue-600 ml-2">{selectedTicker.name}</span>
+                    </div>
                     <button
-                      key={ticker.value}
                       type="button"
-                      onClick={() => setAssetTicker(ticker.value)}
-                      className={`p-3 rounded-xl border-2 transition-all flex items-center gap-2 ${
-                        assetTicker === ticker.value
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-slate-200 bg-white hover:border-slate-300'
-                      }`}
+                      onClick={() => {
+                        setSelectedTicker(null);
+                        setTickerSearch('');
+                        setPreviewPrice(null);
+                      }}
+                      className="text-blue-500 hover:text-blue-700"
                     >
-                      <span className="text-xl">{ticker.icon}</span>
-                      <span className={`font-medium ${assetTicker === ticker.value ? 'text-blue-600' : 'text-slate-700'}`}>
-                        {ticker.label}
-                      </span>
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                      </svg>
                     </button>
-                  ))}
-                </div>
+                  </div>
+                )}
               </div>
 
               <Input
@@ -816,19 +1056,114 @@ export function Config() {
                 placeholder="0.00000000"
               />
 
-              {cryptoPrices && assetQuantity && parseFloat(assetQuantity) > 0 && (
+              <Input
+                label="Precio de compra (USD por unidad)"
+                type="number"
+                step="0.01"
+                value={assetPurchasePrice}
+                onChange={(e) => setAssetPurchasePrice(e.target.value)}
+                placeholder="Opcional - para calcular ganancia"
+              />
+
+              {selectedTicker && previewPrice !== null && parseFloat(assetQuantity || '0') > 0 && (
                 <div className="p-3 bg-slate-50 rounded-xl">
                   <p className="text-sm text-slate-500">Valor actual</p>
                   <p className="text-lg font-semibold text-slate-900">
-                    ${formatNumber(parseFloat(assetQuantity) * (cryptoPrices[assetTicker] || 0))} USD
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    1 {assetTicker} = ${formatNumber(cryptoPrices[assetTicker] || 0)} USD
+                    ${formatNumber(previewPrice)} USD
                   </p>
                 </div>
               )}
             </>
-          ) : (
+          )}
+
+          {assetType === 'cedear' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1.5">Buscar CEDEAR</label>
+                <Input
+                  value={tickerSearch}
+                  onChange={(e) => {
+                    setTickerSearch(e.target.value);
+                    setSelectedCedear(null);
+                    setValidationError(null);
+                    setPreviewPrice(null);
+                  }}
+                  placeholder="Ej: AAPL, GOOGL, MELI..."
+                />
+                {isValidating && (
+                  <p className="text-xs text-slate-400 mt-1">Validando...</p>
+                )}
+                {cedearSearchResults.length > 0 && !selectedCedear && (
+                  <div className="mt-2 border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                    {cedearSearchResults.map((cedear) => (
+                      <button
+                        key={cedear.symbol}
+                        type="button"
+                        onClick={() => handleSelectCedear(cedear)}
+                        className="w-full px-4 py-3 text-left hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors"
+                      >
+                        <span className="font-medium text-slate-900">{cedear.symbol.replace('.BA', '')}</span>
+                        <span className="text-slate-500 ml-2">{cedear.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {selectedCedear && (
+                  <div className="mt-2 p-3 bg-emerald-50 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="font-medium text-emerald-900">{selectedCedear.symbol.replace('.BA', '')}</span>
+                      <span className="text-emerald-600 ml-2">{selectedCedear.name}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCedear(null);
+                        setTickerSearch('');
+                        setPreviewPrice(null);
+                      }}
+                      className="text-emerald-500 hover:text-emerald-700"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <Input
+                label="Cantidad"
+                type="number"
+                step="1"
+                value={assetQuantity}
+                onChange={(e) => setAssetQuantity(e.target.value)}
+                placeholder="0"
+              />
+
+              <Input
+                label={`Precio de compra (${selectedCedear?.currency || 'USD'} por unidad)`}
+                type="number"
+                step="0.01"
+                value={assetPurchasePrice}
+                onChange={(e) => setAssetPurchasePrice(e.target.value)}
+                placeholder="Opcional - para calcular ganancia"
+              />
+
+              {selectedCedear && previewPrice !== null && parseFloat(assetQuantity || '0') > 0 && (
+                <div className="p-3 bg-slate-50 rounded-xl">
+                  <p className="text-sm text-slate-500">Valor actual</p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    ${formatNumber(previewPrice * parseFloat(assetQuantity || '0'))} {selectedCedear.currency}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    1 {selectedCedear.symbol.replace('.BA', '')} = ${formatNumber(previewPrice)} {selectedCedear.currency}
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          {assetType !== 'crypto' && assetType !== 'cedear' && (
             <>
               <Input
                 label="Nombre"
@@ -860,6 +1195,10 @@ export function Config() {
                 </div>
               </div>
             </>
+          )}
+
+          {validationError && (
+            <p className="text-sm text-red-500">{validationError}</p>
           )}
 
           <Button onClick={handleAddAsset} className="w-full" size="lg">

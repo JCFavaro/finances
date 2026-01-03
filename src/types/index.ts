@@ -96,9 +96,7 @@ export interface AppSettings {
 }
 
 // Assets / Patrimony
-export type AssetType = 'efectivo' | 'banco' | 'inversiones' | 'crypto' | 'otros';
-
-export type CryptoTicker = 'BTC' | 'ETH';
+export type AssetType = 'efectivo' | 'banco' | 'inversiones' | 'crypto' | 'cedear' | 'otros';
 
 export interface Asset {
   id?: number;
@@ -106,8 +104,9 @@ export interface Asset {
   type: AssetType;
   amount: number;
   currency: Currency;
-  ticker?: CryptoTicker;
+  ticker?: string; // Dynamic ticker for crypto (e.g., 'bitcoin', 'ethereum') or CEDEAR (e.g., 'AAPL.BA')
   quantity?: number;
+  purchasePrice?: number; // Unit price at purchase for calculating gains/losses
   createdAt: Date;
   updatedAt: Date;
 }

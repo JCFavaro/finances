@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { getCryptoPrices, type CryptoPrices } from '../../services/cryptoPrices';
-import type { Asset, Currency, AssetType, CryptoTicker } from '../../types';
+import { getCedearPrices, type CedearPrices } from '../../services/cedearPrices';
+import type { Asset, Currency, AssetType } from '../../types';
 import type { ExchangeRate } from '../../services/exchangeRate';
 
 interface AssetRow {
@@ -14,6 +15,7 @@ interface AssetRow {
   currency: string;
   ticker: string | null;
   quantity: number | null;
+  purchase_price: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -25,8 +27,9 @@ function rowToAsset(row: AssetRow): Asset {
     type: row.type as AssetType,
     amount: row.amount,
     currency: row.currency as Currency,
-    ticker: row.ticker as CryptoTicker | undefined,
+    ticker: row.ticker ?? undefined,
     quantity: row.quantity ?? undefined,
+    purchasePrice: row.purchase_price ?? undefined,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -37,12 +40,8 @@ export const ASSET_TYPES: { value: AssetType; label: string; icon: string }[] = 
   { value: 'banco', label: 'Banco', icon: '🏦' },
   { value: 'inversiones', label: 'Inversiones', icon: '📈' },
   { value: 'crypto', label: 'Crypto', icon: '₿' },
+  { value: 'cedear', label: 'CEDEAR', icon: '📊' },
   { value: 'otros', label: 'Otros', icon: '💰' },
-];
-
-export const CRYPTO_TICKERS: { value: CryptoTicker; label: string; icon: string }[] = [
-  { value: 'BTC', label: 'Bitcoin', icon: '₿' },
-  { value: 'ETH', label: 'Ethereum', icon: 'Ξ' },
 ];
 
 export function useAssets() {
@@ -90,40 +89,84 @@ export function useAssets() {
   return assets;
 }
 
-export function useCryptoPrices() {
-  const [prices, setPrices] = useState<CryptoPrices | undefined>(undefined);
+export function useAssetPrices(assets: Asset[] | undefined) {
+  const [cryptoPrices, setCryptoPrices] = useState<CryptoPrices>({});
+  const [cedearPrices, setCedearPrices] = useState<CedearPrices>({});
+  const [loadingCrypto, setLoadingCrypto] = useState(false);
+  const [loadingCedear, setLoadingCedear] = useState(false);
 
   useEffect(() => {
-    getCryptoPrices().then(setPrices);
-  }, []);
+    if (!assets) return;
 
-  return prices;
+    // Get unique crypto coin IDs
+    const cryptoAssets = assets.filter(a => a.type === 'crypto' && a.ticker);
+    const cryptoIds = [...new Set(cryptoAssets.map(a => a.ticker!))];
+
+    if (cryptoIds.length > 0) {
+      setLoadingCrypto(true);
+      getCryptoPrices(cryptoIds)
+        .then(setCryptoPrices)
+        .finally(() => setLoadingCrypto(false));
+    }
+
+    // Get unique CEDEAR symbols
+    const cedearAssets = assets.filter(a => a.type === 'cedear' && a.ticker);
+    const cedearSymbols = [...new Set(cedearAssets.map(a => a.ticker!))];
+
+    if (cedearSymbols.length > 0) {
+      setLoadingCedear(true);
+      getCedearPrices(cedearSymbols)
+        .then(setCedearPrices)
+        .finally(() => setLoadingCedear(false));
+    }
+  }, [assets]);
+
+  const isLoadingPrices = loadingCrypto || loadingCedear;
+
+  return { cryptoPrices, cedearPrices, isLoadingPrices };
 }
 
 export function useAssetsSummary(exchangeRate?: ExchangeRate) {
   const assets = useAssets();
-  const cryptoPrices = useCryptoPrices();
+  const { cryptoPrices, cedearPrices, isLoadingPrices } = useAssetPrices(assets);
 
   if (!assets) return undefined;
 
   // Calculate crypto assets value in USD
   const cryptoAssets = assets.filter(a => a.type === 'crypto' && a.ticker && a.quantity);
   const totalCryptoUSD = cryptoAssets.reduce((sum, a) => {
-    if (!cryptoPrices || !a.ticker || !a.quantity) return sum;
+    if (!a.ticker || !a.quantity) return sum;
     const price = cryptoPrices[a.ticker] ?? 0;
     return sum + (a.quantity * price);
   }, 0);
 
-  // Non-crypto assets
-  const nonCryptoAssets = assets.filter(a => a.type !== 'crypto');
-
-  const totalARS = nonCryptoAssets
-    .filter(a => a.currency === 'ARS')
-    .reduce((sum, a) => sum + a.amount, 0);
-
-  const totalUSD = nonCryptoAssets
+  // Calculate CEDEAR assets value (can be USD or ARS)
+  const cedearAssets = assets.filter(a => a.type === 'cedear' && a.ticker && a.quantity);
+  const totalCedearUSD = cedearAssets
     .filter(a => a.currency === 'USD')
-    .reduce((sum, a) => sum + a.amount, 0) + totalCryptoUSD;
+    .reduce((sum, a) => {
+      if (!a.ticker || !a.quantity) return sum;
+      const price = cedearPrices[a.ticker] ?? 0;
+      return sum + (a.quantity * price);
+    }, 0);
+  const totalCedearARS = cedearAssets
+    .filter(a => a.currency === 'ARS')
+    .reduce((sum, a) => {
+      if (!a.ticker || !a.quantity) return sum;
+      const price = cedearPrices[a.ticker] ?? 0;
+      return sum + (a.quantity * price);
+    }, 0);
+
+  // Non-crypto/CEDEAR assets
+  const otherAssets = assets.filter(a => a.type !== 'crypto' && a.type !== 'cedear');
+
+  const totalARS = otherAssets
+    .filter(a => a.currency === 'ARS')
+    .reduce((sum, a) => sum + a.amount, 0) + totalCedearARS;
+
+  const totalUSD = otherAssets
+    .filter(a => a.currency === 'USD')
+    .reduce((sum, a) => sum + a.amount, 0) + totalCryptoUSD + totalCedearUSD;
 
   const totalUnifiedARS = totalARS + (exchangeRate ? totalUSD * exchangeRate.venta : 0);
 
@@ -131,9 +174,12 @@ export function useAssetsSummary(exchangeRate?: ExchangeRate) {
     totalARS,
     totalUSD,
     totalCryptoUSD,
+    totalCedearUSD,
     totalUnifiedARS,
     count: assets.length,
     cryptoPrices,
+    cedearPrices,
+    isLoadingPrices,
   };
 }
 
@@ -151,6 +197,7 @@ export async function addAsset(
       currency: data.currency,
       ticker: data.ticker ?? null,
       quantity: data.quantity ?? null,
+      purchase_price: data.purchasePrice ?? null,
     })
     .select('id')
     .single();
@@ -175,6 +222,7 @@ export async function updateAsset(
   if (data.currency !== undefined) updates.currency = data.currency;
   if (data.ticker !== undefined) updates.ticker = data.ticker;
   if (data.quantity !== undefined) updates.quantity = data.quantity;
+  if (data.purchasePrice !== undefined) updates.purchase_price = data.purchasePrice;
 
   const { error } = await supabase
     .from('assets')
